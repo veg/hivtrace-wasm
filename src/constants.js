@@ -20,4 +20,4 @@ export const GET_TIME_WITH_MILLISECONDS = (date) => {
     return `${t.substring(0, 8)}.${("00" + date.getMilliseconds()).slice(-3)}`;
 }
 
-export const CAWLIGN_TEST_DATA_PATH = '/data/HIV1-pol-326-modified.fa';
+export const CAWLIGN_TEST_DATA_PATH = 'data/HIV1-pol-326-modified.fa';

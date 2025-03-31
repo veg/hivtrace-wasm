@@ -22,6 +22,10 @@ export class App extends Component {
       pyodide: undefined,
 
       outputAutoscroll: true,
+      inputFile: undefined,
+      distanceThreshold: undefined,
+      minOverlap: undefined,
+      ambiguities: "resolve",
     };
   }
 
@@ -29,6 +33,22 @@ export class App extends Component {
     this.initPyodide();
     this.initBiowasm();
   }
+
+  setInputFile = (event) => {
+    this.setState({ inputFile: event.target.files[0] });
+  };
+
+  setDistanceThreshold = (event) => {
+    this.setState({ distanceThreshold: event.target.value });
+  };
+
+  setMinOverlap = (event) => {
+    this.setState({ minOverlap: event.target.value });
+  };
+
+  setAmbiguities = (event) => {
+    this.setState({ ambiguities: event.target.value });
+  };
 
   initPyodide = async () => {
     const pyodide = await loadPyodide({
@@ -73,7 +93,7 @@ export class App extends Component {
       async () => {
         this.log("cawlign and tn93 loaded via Biowasm.");
         const CLI = this.state.CLI;
-        const data = await (await fetch(`${import.meta.env.BASE_URL || ""}data/HIV1-pol-326-modified.fa`)).text();
+        const data = await (await fetch(`${import.meta.env.BASE_URL || ""}${CAWLIGN_TEST_DATA_PATH}`)).text();
         console.log(data);
         const mounts = await CLI.mount([{ name: "HIV1-pol-326-modified.fa", data: data }]);
 
@@ -91,6 +111,14 @@ export class App extends Component {
     );
   };
 
+  loadExample = async () => {
+    // TODO: Implement
+  }
+
+  runHivtrace = async () => {
+    // TODO: Implement
+  }
+
   log = (output, extraFormat = true) => {
     const textArea = document.getElementById(OUTPUT_ID);
     const date = new Date();
@@ -102,42 +130,53 @@ export class App extends Component {
   render() {
     return (
       <Fragment>
-        <h1 className="mt-5 text-center">HIV-TRACE WASM</h1>
+        <h2 className="mt-5 text-center">HIV-TRACE WASM</h2>
         <p className="text-center">
-          A WebAssembly implementation of the HIV-TRACE pipeline. Uses&nbsp;
-          <a href="https://github.com/veg/cawlign" target="_blank" rel="noreferrer">
-            cawlign
-          </a>
-          ,&nbsp;
-          <a href="https://github.com/veg/tn93" target="_blank" rel="noreferrer">
-            tn93
-          </a>
-          , and&nbsp;
-          <a href="https://github.com/veg/hivclustering" target="_blank" rel="noreferrer">
-            hivnetworkcsv
-          </a>
-          . Implemented using&nbsp;
-          <a href="https://biowasm.com/" target="_blank" rel="noreferrer">
-            Biowasm
-          </a>
-          ,&nbsp;
-          <a href="https://pyodide.org/" target="_blank" rel="noreferrer">
-            Pyodide
-          </a>
-          , and&nbsp;
-          <a href="https://emscripten.org/" target="_blank" rel="noreferrer">
-            Emscripten
-          </a>
-          .
+          A completely client-side WebAssembly implementation of the HIV-TRACE pipeline. Uses&nbsp;
+          <a href="https://github.com/veg/cawlign" target="_blank" rel="noreferrer">cawlign</a>,&nbsp;
+          <a href="https://github.com/veg/tn93" target="_blank" rel="noreferrer">tn93
+          </a>, and&nbsp;
+          <a href="https://github.com/veg/hivclustering" target="_blank" rel="noreferrer">hivnetworkcsv</a>. Implemented using&nbsp;
+          <a href="https://biowasm.com/" target="_blank" rel="noreferrer">Biowasm</a>,&nbsp;
+          <a href="https://pyodide.org/" target="_blank" rel="noreferrer">Pyodide</a>, and&nbsp;
+          <a href="https://emscripten.org/" target="_blank" rel="noreferrer">Emscripten</a>.
         </p>
-        <textarea
-          className="form-control mt-5"
-          id={OUTPUT_ID}
-          data-testid="output-text"
-          datarows="3"
-          spellCheck="false"
-          disabled
-        ></textarea>
+        <div id="content" className="mt-3">
+          <div id="input-container">
+            <h3>Input</h3>
+            <div id="input" className="pb-4">
+              <div id="input-sequences-container" className="mb-3">
+                <label htmlFor="input-sequences" className="form-label">Select Sequence File</label>
+                <input className="form-control" type="file" id="input-sequences" onChange={this.setInputFile} />
+              </div>
+              <p className="mt-4 mb-2">Distance Threshold</p>
+              <input type="number" className="form-control" id="distance-threshold" placeholder="Default Distance Threshold: 0.015" min="0" max="1" step="0.01" value={this.state.distanceThreshold} onInput={this.setDistanceThreshold} />
+              <p className="mt-4 mb-2">Minimum Overlap (50 to 5000)</p>
+              <input type="number" className="form-control" id="min-overlap" placeholder="Default Minimum Overlap: 500" min="50" max="5000" step="50" value={this.state.minOverlap} onInput={this.setMinOverlap} />
+              <p className="mt-4 mb-2">Handle Ambiguities</p>
+              <select className="form-select" id="ambiguities" value={this.state.ambiguities} onChange={this.setAmbiguities}>
+                <option value="resolve">Resolve</option>
+                <option value="average">Average</option>
+              </select>
+              <p className="mt-4 mb-2">Ambiguity Fraction</p>
+              <input type="number" className="form-control" id="ambiguity-fraction" placeholder="Default Ambiguity Fraction: 0.015" min="0" max="1" step="0.01" value={this.state.ambiguityFraction} onInput={this.setAmbiguityFraction} />
+              <p className="mt-4 mb-2">Remove DRAMS</p>
+              <select className="form-select" id="remove-drams" value={this.state.removeDrams} onChange={this.setRemoveDrams}>
+                <option value="no">No</option>
+                <option value="cdc-surveillance-list">CDC Surveillance List</option>
+              </select>
+            </div>
+            <button className="btn btn-warning mt-4 w-100" id="load-example" onClick={this.loadExample}>Load Example Data</button>
+            <button className="btn btn-primary mt-4 w-100" id="run-button" onClick={this.runHivtrace}>Run</button>
+          </div>
+          <div id="output-console-container">
+            <h3>Output</h3>
+            <textarea className="form-control" id={OUTPUT_ID} datarows="3" spellCheck="false" disabled></textarea>
+          </div>
+        </div>
+        <small className="text-center mt-5">
+          Source code: <a href="https://github.com/veg/hivtrace-wasm">github.com/veg/hivtrace-wasm</a>
+        </small>
       </Fragment>
     );
   }
