@@ -5,11 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/favicon.ico" />
     <title>HIV-TRACE WASM</title>
+    <!-- Cross-Origin headers needed for WASM with shared memory -->
+    <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
+    <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
   </head>
 
   <body>
     <script type="module" src="/src/main.jsx"></script>
-    <script src="/tools/pyodide/pyodide.js"></script>
+    <!-- <script src="/tools/pyodide/pyodide.js"></script> --> <!-- Removed Pyodide -->
     <script src="/tools/aioli.js"></script>
   </body>
 </html>
