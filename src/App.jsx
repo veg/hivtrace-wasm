@@ -35,6 +35,7 @@ export class App extends Component {
       ambiguityFraction: undefined,
       removeDrams: "no",
       networkData: null,
+      inputData: null,
       alignmentData: null,
       pairwiseDistances: null,
     };
@@ -280,8 +281,8 @@ export class App extends Component {
       // Read the input file
       const fileContent = await this.state.inputFile.text();
       
-      // Store the alignment data in state
-      this.setState({ alignmentData: fileContent });
+      // Store the original input data in state
+      this.setState({ inputData: fileContent });
       
       // Write file to biowasm filesystem
       this.log("Writing file to biowasm");
@@ -314,83 +315,80 @@ export class App extends Component {
         this.log(`Error checking input file: ${error.message || error}`);
       }
       
-      // Define output file name
+      // Define output files
+      const ALIGNED_SEQUENCE_FILE = "aligned_sequences.fasta";
       const PAIRWISE_DIST_FILE_NAME = "output_distances.csv";
       
-      // Let's run TN93 directly without the -o flag and capture the output ourselves
-      let tn93Command = `tn93 -t ${distanceThreshold} -a ${ambiguities} -l ${minOverlap} -f csv`;
-      
-      // Add ambiguity fraction if using 'resolve' mode
-      if (ambiguities === "resolve") {
-        tn93Command += ` -g ${ambiguityFraction}`;
-      }
-      
-      // Handle DRAMS removal if needed
-      if (this.state.removeDrams === "cdc-surveillance-list") {
-        tn93Command += " -d";
-      }
-      
-      // Try a direct approach without redirecting output
-      this.log(`Running tn93 command: ${tn93Command} ${ALIGNMENT_FILE_NAME}`);
+      // Step 1: Run cawlign to align sequences
+      this.log("Running cawlign to align sequences");
       try {
-        // Execute TN93 without output redirection and capture the output directly
-        this.log(`Running TN93 command without -o flag: ${tn93Command} ${ALIGNMENT_FILE_NAME}`);
-        const tn93Result = await CLI.exec(`${tn93Command} ${ALIGNMENT_FILE_NAME}`);
+        const cawlignCommand = `cawlign -o ${ALIGNED_SEQUENCE_FILE} -r /shared/cawlign/references/HXB2_pol ${ALIGNMENT_FILE_NAME}`;
+        this.log(`Running cawlign command: ${cawlignCommand}`);
         
-        // Log a small part of TN93 output for debugging
-        if (tn93Result.stdout) {
-          const stdoutPreview = tn93Result.stdout.substring(0, 200);
-          this.log(`TN93 stdout preview: ${stdoutPreview}...`);
-          this.log(`TN93 stdout length: ${tn93Result.stdout.length} bytes`);
+        const cawlignResult = await CLI.exec(cawlignCommand);
+        
+        if (cawlignResult.stderr) {
+          this.log("cawlign stderr: " + cawlignResult.stderr);
         }
+        
+        // Verify alignment was created
+        const alignmentExists = await CLI.fs.exists(ALIGNED_SEQUENCE_FILE);
+        if (!alignmentExists) {
+          this.log("Error: cawlign did not create alignment file");
+          throw new Error("cawlign failed to create alignment file");
+        }
+        
+        const alignmentStats = await CLI.fs.stat(ALIGNED_SEQUENCE_FILE);
+        this.log(`Alignment file created, size: ${alignmentStats.size} bytes`);
+        
+        // Read the alignment and store it in state
+        const alignmentContent = await CLI.fs.readFile(ALIGNED_SEQUENCE_FILE, { 
+          encoding: 'utf8' 
+        });
+        this.setState({ alignmentData: alignmentContent });
+        
+        this.log("cawlign completed successfully");
+      } catch (cawlignError) {
+        this.log(`Error running cawlign: ${cawlignError.message}`);
+        throw cawlignError;
+      }
+      
+      // Step 2: Run TN93 on the aligned sequences
+      this.log("Running TN93 on aligned sequences");
+      try {
+        // Build TN93 command
+        let tn93Command = `tn93 -t ${distanceThreshold} -a ${ambiguities} -l ${minOverlap} -f csv -o ${PAIRWISE_DIST_FILE_NAME}`;
+        
+        // Add ambiguity fraction if using 'resolve' mode
+        if (ambiguities === "resolve") {
+          tn93Command += ` -g ${ambiguityFraction}`;
+        }
+        
+        // Handle DRAMS removal if needed
+        if (this.state.removeDrams === "cdc-surveillance-list") {
+          tn93Command += " -d";
+        }
+        
+        tn93Command += ` ${ALIGNED_SEQUENCE_FILE}`;
+        
+        this.log(`Running TN93 command: ${tn93Command}`);
+        const tn93Result = await CLI.exec(tn93Command);
         
         if (tn93Result.stderr) {
           this.log("TN93 stderr: " + tn93Result.stderr);
         }
         
-        // Check if the output contains CSV data
-        if (tn93Result.stdout && (tn93Result.stdout.includes(",") || tn93Result.stdout.includes("\t"))) {
-          this.log("TN93 produced CSV data on stdout. Writing to file.");
-          await CLI.fs.writeFile(PAIRWISE_DIST_FILE_NAME, tn93Result.stdout);
-          
-          // Verify file was written
-          const fileExists = await CLI.fs.exists(PAIRWISE_DIST_FILE_NAME);
-          const fileStats = await CLI.fs.stat(PAIRWISE_DIST_FILE_NAME);
-          this.log(`Output file created: ${fileExists}, size: ${fileStats.size} bytes`);
-          
-          this.log("TN93 completed successfully");
-        } else {
-          this.log("TN93 did not produce expected CSV data in stdout");
-          
-          // Write a simple test CSV as fallback for testing
-          this.log("Creating a simple test distance matrix as fallback");
-          
-          // Parse the FASTA file to extract sequence IDs
-          const fastaContent = await CLI.fs.readFile(ALIGNMENT_FILE_NAME, { encoding: 'utf8' });
-          const sequenceIds = [];
-          
-          // Very basic FASTA parser
-          const lines = fastaContent.split('\n');
-          for (let line of lines) {
-            line = line.trim();
-            if (line.startsWith('>')) {
-              // Extract ID without '>' and whitespace
-              const id = line.substring(1).split(/\s+/)[0];
-              sequenceIds.push(id);
-            }
-          }
-          
-          // Create a simple distance matrix
-          let csvContent = "";
-          for (let i = 0; i < sequenceIds.length; i++) {
-            for (let j = i + 1; j < sequenceIds.length; j++) {
-              csvContent += `${sequenceIds[i]},${sequenceIds[j]},0.01\n`;
-            }
-          }
-          
-          await CLI.fs.writeFile(PAIRWISE_DIST_FILE_NAME, csvContent);
-          this.log(`Created test distance matrix with ${sequenceIds.length} sequences`);
+        // Verify distance file was created
+        const distancesExist = await CLI.fs.exists(PAIRWISE_DIST_FILE_NAME);
+        if (!distancesExist) {
+          this.log("Error: TN93 did not create distance file");
+          throw new Error("TN93 failed to create distance file");
         }
+        
+        const distanceStats = await CLI.fs.stat(PAIRWISE_DIST_FILE_NAME);
+        this.log(`Distance file created, size: ${distanceStats.size} bytes`);
+        
+        this.log("TN93 completed successfully");
       } catch (tn93Error) {
         this.log(`Error running TN93: ${tn93Error.message}`);
         throw tn93Error;
@@ -650,12 +648,21 @@ export class App extends Component {
                     <i className="bi bi-download me-2"></i>Network Results (JSON)
                   </button>
                   
+                  {this.state.inputData && (
+                    <button 
+                      className="btn btn-outline-primary me-2" 
+                      onClick={() => this.downloadData('input_sequences.fasta', this.state.inputData)}
+                    >
+                      <i className="bi bi-download me-2"></i>Input Sequences (FASTA)
+                    </button>
+                  )}
+                  
                   {this.state.alignmentData && (
                     <button 
                       className="btn btn-outline-primary me-2" 
-                      onClick={() => this.downloadData('alignment.fasta', this.state.alignmentData)}
+                      onClick={() => this.downloadData('aligned_sequences.fasta', this.state.alignmentData)}
                     >
-                      <i className="bi bi-download me-2"></i>Alignment (FASTA)
+                      <i className="bi bi-download me-2"></i>Aligned Sequences (FASTA)
                     </button>
                   )}
                   
