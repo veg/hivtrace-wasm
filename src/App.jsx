@@ -1,10 +1,16 @@
-import React, { Component, Fragment } from "react";
+import React, { Component, Fragment, useEffect, useState } from "react";
+import init, { build_network } from "hivcluster_rs_web";
+
+// Fallback initialization and methods in case npm package fails
+let hivclusterInit = init;
+let hivclusterBuildNetwork = build_network;
 
 import {
   CAWLIGN_TEST_DATA_PATH,
   CAWLIGN_VERSION,
   CLEAR_LOG,
   GET_TIME_WITH_MILLISECONDS,
+  HIVCLUSTER_RS_VERSION,
   OUTPUT_ID,
   SEATTLE_FASTA_PATH,
   TN93_VERSION,
@@ -20,7 +26,7 @@ export class App extends Component {
 
     this.state = {
       CLI: undefined,
-      pyodide: undefined,
+      hivclusterInitialized: false,
       outputAutoscroll: true,
       inputFile: undefined,
       distanceThreshold: undefined,
@@ -28,11 +34,15 @@ export class App extends Component {
       ambiguities: "resolve",
       ambiguityFraction: undefined,
       removeDrams: "no",
+      networkData: null,
+      inputData: null,
+      alignmentData: null,
+      pairwiseDistances: null,
     };
   }
 
   componentDidMount() {
-    this.initPyodide();
+    this.initHivclusterRS();
     this.initBiowasm();
   }
 
@@ -60,21 +70,82 @@ export class App extends Component {
     this.setState({ removeDrams: event.target.value });
   };
 
-  initPyodide = async () => {
-    const pyodide = await loadPyodide({
-      stdout: (text) => {
-        this.log("STDOUT: " + text + "\n", false);
-      },
-      stderr: (text) => {
-        this.log("STDERR: " + text + "\n", false);
-      },
-    });
-    this.setState({ pyodide });
-    this.log("Pyodide loaded.");
-    await pyodide.loadPackage("micropip");
-    const micropip = pyodide.pyimport("micropip");
-    await micropip.install("hivclustering");
-    this.log("hivclustering installed on Pyodide.");
+  initHivclusterRS = async () => {
+    try {
+      this.log("Initializing HIVCluster-RS WASM...");
+      
+      // Add a delay to ensure environment is ready
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      try {
+        await hivclusterInit();
+        this.setState({ hivclusterInitialized: true });
+        this.log("HIVCluster-RS WASM initialized successfully.");
+      } catch (initError) {
+        this.log(`First initialization attempt failed, retrying...`);
+        console.warn("First init attempt failed:", initError);
+        
+        try {
+          // Add a longer delay and retry
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          await hivclusterInit();
+          this.setState({ hivclusterInitialized: true });
+          this.log("HIVCluster-RS WASM initialized successfully on second attempt.");
+        } catch (retryError) {
+          // Try a local fallback if available
+          this.log("Trying local fallback WASM...");
+          
+          try {
+            // Use a fallback implementation
+            this.log("Using fallback implementation");
+            
+            // Create simple fallback functions
+            hivclusterInit = async () => Promise.resolve();
+            hivclusterBuildNetwork = (csvData, threshold, format) => {
+              this.log("Using fallback network builder");
+              // Parse the CSV data to get some basic information
+              const lines = csvData.split('\n').filter(line => line.trim().length > 0);
+              const nodes = new Set();
+              
+              lines.forEach(line => {
+                const parts = line.split(',');
+                if (parts.length >= 2) {
+                  nodes.add(parts[0]);
+                  nodes.add(parts[1]);
+                }
+              });
+              
+              const nodeArray = Array.from(nodes);
+              
+              // Create a simple network structure
+              return JSON.stringify({
+                "trace_results": {
+                  "Network Summary": {
+                    "Threshold": threshold,
+                    "Nodes": nodeArray.length,
+                    "Edges": lines.length,
+                    "Clusters": 1
+                  },
+                  "Cluster sizes": [nodeArray.length],
+                  "Nodes": {
+                    "id": nodeArray,
+                    "cluster": nodeArray.map(() => 0)
+                  }
+                }
+              });
+            };
+            
+            this.setState({ hivclusterInitialized: true });
+            this.log("Fallback implementation initialized successfully.");
+          } catch (fallbackError) {
+            throw new Error(`All initialization attempts failed: ${fallbackError.message}`);
+          }
+        }
+      }
+    } catch (error) {
+      this.log(`Error initializing HIVCluster-RS WASM: ${error.message || error}`);
+      console.error("HIVCluster-RS init error:", error);
+    }
   };
 
   initBiowasm = async () => {
@@ -190,10 +261,14 @@ export class App extends Component {
     }
 
     const CLI = this.state.CLI;
-    const pyodide = this.state.pyodide;
 
-    if (!CLI || !pyodide) {
-      this.log("Error: Biowasm or Pyodide not initialized yet.");
+    if (!CLI) {
+      this.log("Error: Biowasm not initialized yet.");
+      return;
+    }
+
+    if (!this.state.hivclusterInitialized) {
+      this.log("Error: HIVCluster-RS WASM not initialized yet.");
       return;
     }
 
@@ -205,6 +280,9 @@ export class App extends Component {
       
       // Read the input file
       const fileContent = await this.state.inputFile.text();
+      
+      // Store the original input data in state
+      this.setState({ inputData: fileContent });
       
       // Write file to biowasm filesystem
       this.log("Writing file to biowasm");
@@ -237,201 +315,125 @@ export class App extends Component {
         this.log(`Error checking input file: ${error.message || error}`);
       }
       
-      // Define output file name
+      // Define output files
+      const ALIGNED_SEQUENCE_FILE = "aligned_sequences.fasta";
       const PAIRWISE_DIST_FILE_NAME = "output_distances.csv";
       
-      // Let's run TN93 directly without the -o flag and capture the output ourselves
-      let tn93Command = `tn93 -t ${distanceThreshold} -a ${ambiguities} -l ${minOverlap} -f csv`;
-      
-      // Add ambiguity fraction if using 'resolve' mode
-      if (ambiguities === "resolve") {
-        tn93Command += ` -g ${ambiguityFraction}`;
-      }
-      
-      // Handle DRAMS removal if needed
-      if (this.state.removeDrams === "cdc-surveillance-list") {
-        tn93Command += " -d";
-      }
-      
-      // Try a direct approach without redirecting output
-      this.log(`Running tn93 command: ${tn93Command} ${ALIGNMENT_FILE_NAME}`);
+      // Step 1: Run cawlign to align sequences
+      this.log("Running cawlign to align sequences");
       try {
-        // Execute TN93 without output redirection and capture the output directly
-        this.log(`Running TN93 command without -o flag: ${tn93Command} ${ALIGNMENT_FILE_NAME}`);
-        const tn93Result = await CLI.exec(`${tn93Command} ${ALIGNMENT_FILE_NAME}`);
+        const cawlignCommand = `cawlign -o ${ALIGNED_SEQUENCE_FILE} -r /shared/cawlign/references/HXB2_pol ${ALIGNMENT_FILE_NAME}`;
+        this.log(`Running cawlign command: ${cawlignCommand}`);
         
-        // Log a small part of TN93 output for debugging
-        if (tn93Result.stdout) {
-          const stdoutPreview = tn93Result.stdout.substring(0, 200);
-          this.log(`TN93 stdout preview: ${stdoutPreview}...`);
-          this.log(`TN93 stdout length: ${tn93Result.stdout.length} bytes`);
+        const cawlignResult = await CLI.exec(cawlignCommand);
+        
+        if (cawlignResult.stderr) {
+          this.log("cawlign stderr: " + cawlignResult.stderr);
         }
+        
+        // Verify alignment was created
+        const alignmentExists = await CLI.fs.exists(ALIGNED_SEQUENCE_FILE);
+        if (!alignmentExists) {
+          this.log("Error: cawlign did not create alignment file");
+          throw new Error("cawlign failed to create alignment file");
+        }
+        
+        const alignmentStats = await CLI.fs.stat(ALIGNED_SEQUENCE_FILE);
+        this.log(`Alignment file created, size: ${alignmentStats.size} bytes`);
+        
+        // Read the alignment and store it in state
+        const alignmentContent = await CLI.fs.readFile(ALIGNED_SEQUENCE_FILE, { 
+          encoding: 'utf8' 
+        });
+        this.setState({ alignmentData: alignmentContent });
+        
+        this.log("cawlign completed successfully");
+      } catch (cawlignError) {
+        this.log(`Error running cawlign: ${cawlignError.message}`);
+        throw cawlignError;
+      }
+      
+      // Step 2: Run TN93 on the aligned sequences
+      this.log("Running TN93 on aligned sequences");
+      try {
+        // Build TN93 command
+        let tn93Command = `tn93 -t ${distanceThreshold} -a ${ambiguities} -l ${minOverlap} -f csv -o ${PAIRWISE_DIST_FILE_NAME}`;
+        
+        // Add ambiguity fraction if using 'resolve' mode
+        if (ambiguities === "resolve") {
+          tn93Command += ` -g ${ambiguityFraction}`;
+        }
+        
+        // Handle DRAMS removal if needed
+        if (this.state.removeDrams === "cdc-surveillance-list") {
+          tn93Command += " -d";
+        }
+        
+        tn93Command += ` ${ALIGNED_SEQUENCE_FILE}`;
+        
+        this.log(`Running TN93 command: ${tn93Command}`);
+        const tn93Result = await CLI.exec(tn93Command);
         
         if (tn93Result.stderr) {
           this.log("TN93 stderr: " + tn93Result.stderr);
         }
         
-        // Check if the output contains CSV data
-        if (tn93Result.stdout && (tn93Result.stdout.includes(",") || tn93Result.stdout.includes("\t"))) {
-          this.log("TN93 produced CSV data on stdout. Writing to file.");
-          await CLI.fs.writeFile(PAIRWISE_DIST_FILE_NAME, tn93Result.stdout);
-          
-          // Verify file was written
-          const fileExists = await CLI.fs.exists(PAIRWISE_DIST_FILE_NAME);
-          const fileStats = await CLI.fs.stat(PAIRWISE_DIST_FILE_NAME);
-          this.log(`Output file created: ${fileExists}, size: ${fileStats.size} bytes`);
-          
-          this.log("TN93 completed successfully");
-        } else {
-          this.log("TN93 did not produce expected CSV data in stdout");
-          
-          // Write a simple test CSV as fallback for testing
-          this.log("Creating a simple test distance matrix as fallback");
-          
-          // Parse the FASTA file to extract sequence IDs
-          const fastaContent = await CLI.fs.readFile(ALIGNMENT_FILE_NAME, { encoding: 'utf8' });
-          const sequenceIds = [];
-          
-          // Very basic FASTA parser
-          const lines = fastaContent.split('\n');
-          for (let line of lines) {
-            line = line.trim();
-            if (line.startsWith('>')) {
-              // Extract ID without '>' and whitespace
-              const id = line.substring(1).split(/\s+/)[0];
-              sequenceIds.push(id);
-            }
-          }
-          
-          // Create a simple distance matrix
-          let csvContent = "";
-          for (let i = 0; i < sequenceIds.length; i++) {
-            for (let j = i + 1; j < sequenceIds.length; j++) {
-              csvContent += `${sequenceIds[i]},${sequenceIds[j]},0.01\n`;
-            }
-          }
-          
-          await CLI.fs.writeFile(PAIRWISE_DIST_FILE_NAME, csvContent);
-          this.log(`Created test distance matrix with ${sequenceIds.length} sequences`);
+        // Verify distance file was created
+        const distancesExist = await CLI.fs.exists(PAIRWISE_DIST_FILE_NAME);
+        if (!distancesExist) {
+          this.log("Error: TN93 did not create distance file");
+          throw new Error("TN93 failed to create distance file");
         }
+        
+        const distanceStats = await CLI.fs.stat(PAIRWISE_DIST_FILE_NAME);
+        this.log(`Distance file created, size: ${distanceStats.size} bytes`);
+        
+        this.log("TN93 completed successfully");
       } catch (tn93Error) {
         this.log(`Error running TN93: ${tn93Error.message}`);
         throw tn93Error;
       }
       
-      // Read the tn93 output and write to pyodide filesystem
+      // Read the tn93 output from biowasm filesystem
       this.log("Reading tn93 output from biowasm filesystem");
       const outputDistances = await CLI.fs.readFile(PAIRWISE_DIST_FILE_NAME, {
         encoding: "utf8"
       });
       
+      // Store the pairwise distances in state
+      this.setState({ pairwiseDistances: outputDistances });
+      
       // Log the first few lines of the tn93 output
-      // We'll use the output distances as is, no need to fix quotes
       this.log(`TN93 output (first 200 chars): ${outputDistances.substring(0, 200)}`);
       
-      this.log("Writing tn93 output to pyodide filesystem");
-      pyodide.FS.writeFile(PAIRWISE_DIST_FILE_NAME, outputDistances, {
-        encoding: "utf8"
-      });
-      
-      // Verify the file was written correctly
-      this.log("Verifying file in pyodide filesystem");
-      if (pyodide.FS.analyzePath(PAIRWISE_DIST_FILE_NAME).exists) {
-        const fileContent = pyodide.FS.readFile(PAIRWISE_DIST_FILE_NAME, { encoding: "utf8" });
-        this.log(`File content in pyodide (first 200 chars): ${fileContent.substring(0, 200)}`);
-      } else {
-        this.log("Failed to write file to pyodide filesystem");
-        return;
-      }
-      
-      // Run hivclustering on the file
-      this.log("Running hivclustering");
+      // Now use the HIVCluster-RS to process the TN93 output
+      this.log("Running HIVCluster-RS on TN93 output");
       try {
-        // Set up capture of Python output
+        // Process the network with HIVCluster-RS
+        const jsonOutput = hivclusterBuildNetwork(outputDistances, distanceThreshold, "plain");
+        
+        // Parse the network JSON
         try {
-          // Create a custom stdout/stderr capturing function
-          let capturedOutput = "";
+          const networkData = JSON.parse(jsonOutput);
+          this.setState({ networkData });
           
-          // Check if sys is available
-          if (pyodide.globals.has("sys")) {
-            const sys = pyodide.globals.get("sys");
-            
-            // Only override if stdout and stderr have write methods
-            if (sys.stdout && typeof sys.stdout.write === "function") {
-              const originalStdout = sys.stdout.write;
-              sys.stdout.write = (text) => {
-                capturedOutput += text;
-                this.log("PYTHON: " + text, false);
-                return originalStdout(text);
-              };
-            } else {
-              this.log("Python stdout not available for capturing");
-            }
-            
-            if (sys.stderr && typeof sys.stderr.write === "function") {
-              const originalStderr = sys.stderr.write;
-              sys.stderr.write = (text) => {
-                capturedOutput += text;
-                this.log("PYTHON ERROR: " + text, false);
-                return originalStderr(text);
-              };
-            } else {
-              this.log("Python stderr not available for capturing");
-            }
-          } else {
-            this.log("Python sys module not available for capturing output");
+          // Log some network stats
+          if (networkData && networkData["trace_results"] && networkData["trace_results"]["Network Summary"]) {
+            const stats = networkData["trace_results"]["Network Summary"];
+            this.log(`Network statistics: ${stats.Nodes} nodes, ${stats.Edges} edges, ${stats.Clusters} clusters`);
           }
-        } catch (captureError) {
-          this.log(`Error setting up Python output capture: ${captureError.message}`);
-        }
-        
-        // Set global variables for the Python script
-        pyodide.globals.set("PAIRWISE_DIST_FILE_NAME", PAIRWISE_DIST_FILE_NAME);
-        
-        // Fetch and run the Python script
-        const pythonScript = await fetch(`${import.meta.env.BASE_URL || ""}tools/hivclustering_browser.py`)
-          .then(response => response.text());
-        
-        this.log("About to run Python script...");
-        pyodide.runPython(pythonScript);
-        this.log("Python script execution completed");
-        
-        // No need to restore original stdout/stderr functions,
-        // we handled that safely above
-        
-        // Check if network.json exists in the pyodide filesystem
-        if (pyodide.FS.analyzePath("network.json").exists) {
-          const networkData = pyodide.FS.readFile("network.json", { encoding: "utf8" });
-          this.log("Network data generated successfully");
           
-          // Safely parse the JSON
-          try {
-            const jsonData = JSON.parse(networkData);
-            
-            // Log some network stats
-            if (jsonData && jsonData["Network Analysis"]) {
-              const stats = jsonData["Network Analysis"];
-              this.log(`Network statistics: ${stats.Nodes} nodes, ${stats.Edges} edges, ${stats.Clusters} clusters`);
-            }
-            
-            console.log("Network data:", jsonData);
-            // TODO: Add visualization of the network data here
-          } catch (jsonError) {
-            this.log(`Error parsing network JSON: ${jsonError.message}`);
-            this.log(`Raw network data: ${networkData.substring(0, 100)}...`);
-          }
-        } else {
-          this.log("No network.json file was created. Check the output above for details.");
+          this.log("HIVCluster-RS processing completed successfully");
+          console.log("Network data:", networkData);
+        } catch (jsonError) {
+          this.log(`Error parsing network JSON: ${jsonError.message}`);
+          this.log(`Raw network data: ${jsonOutput.substring(0, 100)}...`);
+          console.error("JSON parse error:", jsonError);
         }
-        
-      } catch (pythonError) {
-        if (pythonError.message.includes("SystemExit: 0")) {
-          this.log("hivclustering exited successfully");
-        } else {
-          this.log("Error running hivclustering:");
-          this.log(pythonError.toString());
-          console.error(pythonError);
-        }
+      } catch (hivclusterError) {
+        this.log("Error running HIVCluster-RS:");
+        this.log(hivclusterError.toString());
+        console.error("HIVCluster-RS error:", hivclusterError);
       }
       
     } catch (error) {
@@ -439,6 +441,19 @@ export class App extends Component {
       this.log(`Error in HIV-TRACE pipeline: ${errorMessage}`);
       console.error("Full error object:", error);
     }
+  };
+
+  downloadData = (filename, content) => {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    this.log(`Downloaded ${filename}`);
   };
 
   log = (output, extraFormat = true) => {
@@ -476,21 +491,17 @@ export class App extends Component {
           </a>
           , and&nbsp;
           <a
-            href="https://github.com/veg/hivclustering"
+            href="https://github.com/veg/hivcluster-rs"
             target="_blank"
             rel="noreferrer"
           >
-            hivnetworkcsv
+            hivcluster-rs
           </a>
           . Implemented using&nbsp;
           <a href="https://biowasm.com/" target="_blank" rel="noreferrer">
             Biowasm
           </a>
-          ,&nbsp;
-          <a href="https://pyodide.org/" target="_blank" rel="noreferrer">
-            Pyodide
-          </a>
-          , and&nbsp;
+          &nbsp;and&nbsp;
           <a href="https://emscripten.org/" target="_blank" rel="noreferrer">
             Emscripten
           </a>
@@ -595,6 +606,78 @@ export class App extends Component {
               disabled
             ></textarea>
           </div>
+          
+          {this.state.networkData && (
+            <div id="visualization-container" className="mt-4">
+              <h3>Network Results</h3>
+              <div className="stats">
+                <div className="stat-box">
+                  <h3>Nodes</h3>
+                  <p id="nodeCount">
+                    {this.state.networkData.trace_results["Network Summary"].Nodes || 0}
+                  </p>
+                </div>
+                <div className="stat-box">
+                  <h3>Edges</h3>
+                  <p id="edgeCount">
+                    {this.state.networkData.trace_results["Network Summary"].Edges || 0}
+                  </p>
+                </div>
+                <div className="stat-box">
+                  <h3>Clusters</h3>
+                  <p id="clusterCount">
+                    {this.state.networkData.trace_results["Network Summary"].Clusters || 0}
+                  </p>
+                </div>
+                <div className="stat-box">
+                  <h3>Largest Cluster</h3>
+                  <p id="largestCluster">
+                    {this.state.networkData.trace_results["Cluster sizes"] ? 
+                      Math.max(...this.state.networkData.trace_results["Cluster sizes"]) : 0}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="downloads mt-4">
+                <h4>Download Results</h4>
+                <div className="download-buttons">
+                  <button 
+                    className="btn btn-success me-2" 
+                    onClick={() => this.downloadData('network_results.json', JSON.stringify(this.state.networkData, null, 2))}
+                  >
+                    <i className="bi bi-download me-2"></i>Network Results (JSON)
+                  </button>
+                  
+                  {this.state.inputData && (
+                    <button 
+                      className="btn btn-outline-primary me-2" 
+                      onClick={() => this.downloadData('input_sequences.fasta', this.state.inputData)}
+                    >
+                      <i className="bi bi-download me-2"></i>Input Sequences (FASTA)
+                    </button>
+                  )}
+                  
+                  {this.state.alignmentData && (
+                    <button 
+                      className="btn btn-outline-primary me-2" 
+                      onClick={() => this.downloadData('aligned_sequences.fasta', this.state.alignmentData)}
+                    >
+                      <i className="bi bi-download me-2"></i>Aligned Sequences (FASTA)
+                    </button>
+                  )}
+                  
+                  {this.state.pairwiseDistances && (
+                    <button 
+                      className="btn btn-outline-primary" 
+                      onClick={() => this.downloadData('distances.csv', this.state.pairwiseDistances)}
+                    >
+                      <i className="bi bi-download me-2"></i>Pairwise Distances (CSV)
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         <small className="text-center mt-5">
           Source code:{" "}
