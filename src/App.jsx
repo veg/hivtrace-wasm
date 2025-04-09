@@ -35,6 +35,8 @@ export class App extends Component {
       ambiguityFraction: undefined,
       removeDrams: "no",
       networkData: null,
+      alignmentData: null,
+      pairwiseDistances: null,
     };
   }
 
@@ -278,6 +280,9 @@ export class App extends Component {
       // Read the input file
       const fileContent = await this.state.inputFile.text();
       
+      // Store the alignment data in state
+      this.setState({ alignmentData: fileContent });
+      
       // Write file to biowasm filesystem
       this.log("Writing file to biowasm");
       await CLI.fs.writeFile(ALIGNMENT_FILE_NAME, fileContent);
@@ -397,6 +402,9 @@ export class App extends Component {
         encoding: "utf8"
       });
       
+      // Store the pairwise distances in state
+      this.setState({ pairwiseDistances: outputDistances });
+      
       // Log the first few lines of the tn93 output
       this.log(`TN93 output (first 200 chars): ${outputDistances.substring(0, 200)}`);
       
@@ -435,6 +443,19 @@ export class App extends Component {
       this.log(`Error in HIV-TRACE pipeline: ${errorMessage}`);
       console.error("Full error object:", error);
     }
+  };
+
+  downloadData = (filename, content) => {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    this.log(`Downloaded ${filename}`);
   };
 
   log = (output, extraFormat = true) => {
@@ -616,6 +637,36 @@ export class App extends Component {
                     {this.state.networkData.trace_results["Cluster sizes"] ? 
                       Math.max(...this.state.networkData.trace_results["Cluster sizes"]) : 0}
                   </p>
+                </div>
+              </div>
+              
+              <div className="downloads mt-4">
+                <h4>Download Results</h4>
+                <div className="download-buttons">
+                  <button 
+                    className="btn btn-success me-2" 
+                    onClick={() => this.downloadData('network_results.json', JSON.stringify(this.state.networkData, null, 2))}
+                  >
+                    <i className="bi bi-download me-2"></i>Network Results (JSON)
+                  </button>
+                  
+                  {this.state.alignmentData && (
+                    <button 
+                      className="btn btn-outline-primary me-2" 
+                      onClick={() => this.downloadData('alignment.fasta', this.state.alignmentData)}
+                    >
+                      <i className="bi bi-download me-2"></i>Alignment (FASTA)
+                    </button>
+                  )}
+                  
+                  {this.state.pairwiseDistances && (
+                    <button 
+                      className="btn btn-outline-primary" 
+                      onClick={() => this.downloadData('distances.csv', this.state.pairwiseDistances)}
+                    >
+                      <i className="bi bi-download me-2"></i>Pairwise Distances (CSV)
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
