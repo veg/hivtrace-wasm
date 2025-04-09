@@ -297,15 +297,24 @@ export class App extends Component {
       // Check if the file was properly written to the biowasm filesystem
       this.log("Checking input file in biowasm filesystem:");
       try {
-        const fileExists = await CLI.fs.exists(ALIGNMENT_FILE_NAME);
+        if (!CLI || !CLI.fs) {
+          throw new Error("CLI filesystem not initialized");
+        }
+        
+        // Use explicit binding for file system methods to prevent 'apply' issues
+        const exists = CLI.fs.exists.bind(CLI.fs);
+        const stat = CLI.fs.stat.bind(CLI.fs);
+        const readFile = CLI.fs.readFile.bind(CLI.fs);
+        
+        const fileExists = await exists(ALIGNMENT_FILE_NAME);
         this.log(`Input file ${ALIGNMENT_FILE_NAME} exists: ${fileExists}`);
         
         if (fileExists) {
-          const fileStats = await CLI.fs.stat(ALIGNMENT_FILE_NAME);
+          const fileStats = await stat(ALIGNMENT_FILE_NAME);
           this.log(`Input file size: ${fileStats.size} bytes`);
           
           // Read the first part of the file to verify content
-          const filePeek = await CLI.fs.readFile(ALIGNMENT_FILE_NAME, { 
+          const filePeek = await readFile(ALIGNMENT_FILE_NAME, { 
             encoding: 'utf8', 
             length: 200 
           });
@@ -322,34 +331,49 @@ export class App extends Component {
       // Step 1: Run cawlign to align sequences
       this.log("Running cawlign to align sequences");
       try {
+        // Simplify the approach to avoid the fs.exists issue
         const cawlignCommand = `cawlign -o ${ALIGNED_SEQUENCE_FILE} -r /shared/cawlign/references/HXB2_pol ${ALIGNMENT_FILE_NAME}`;
         this.log(`Running cawlign command: ${cawlignCommand}`);
         
+        // Execute the command with a direct try/catch
+        this.log("Executing cawlign command...");
         const cawlignResult = await CLI.exec(cawlignCommand);
+        this.log("cawlign execution completed");
         
         if (cawlignResult.stderr) {
           this.log("cawlign stderr: " + cawlignResult.stderr);
         }
         
-        // Verify alignment was created
-        const alignmentExists = await CLI.fs.exists(ALIGNED_SEQUENCE_FILE);
-        if (!alignmentExists) {
-          this.log("Error: cawlign did not create alignment file");
-          throw new Error("cawlign failed to create alignment file");
+        // Add a delay to ensure filesystem operations are complete
+        this.log("Waiting for filesystem operations to complete...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Try to directly read the file with the simpler cat method
+        // This avoids using fs.exists which seems to be causing the error
+        this.log("Reading alignment file directly...");
+        try {
+          // Use CLI.cat() which is simpler and doesn't use fs.exists
+          // This method will throw an error if the file doesn't exist
+          const alignmentContent = await CLI.cat(ALIGNED_SEQUENCE_FILE);
+          
+          if (!alignmentContent || alignmentContent === "") {
+            throw new Error("Alignment file exists but is empty");
+          }
+          
+          this.log(`Alignment file read successfully (${alignmentContent.length} bytes)`);
+          
+          // Store in state
+          this.setState({ alignmentData: alignmentContent });
+          this.log("cawlign completed successfully");
+        } catch (catError) {
+          // If we can't read the file, it likely doesn't exist or there was another issue
+          this.log(`Error reading alignment file: ${catError.message}`);
+          console.error("File read error:", catError);
+          throw new Error(`Failed to read alignment file: ${catError.message}`);
         }
-        
-        const alignmentStats = await CLI.fs.stat(ALIGNED_SEQUENCE_FILE);
-        this.log(`Alignment file created, size: ${alignmentStats.size} bytes`);
-        
-        // Read the alignment and store it in state
-        const alignmentContent = await CLI.fs.readFile(ALIGNED_SEQUENCE_FILE, { 
-          encoding: 'utf8' 
-        });
-        this.setState({ alignmentData: alignmentContent });
-        
-        this.log("cawlign completed successfully");
       } catch (cawlignError) {
         this.log(`Error running cawlign: ${cawlignError.message}`);
+        console.error("Complete cawlign error:", cawlignError);
         throw cawlignError;
       }
       
@@ -371,49 +395,91 @@ export class App extends Component {
         
         tn93Command += ` ${ALIGNED_SEQUENCE_FILE}`;
         
+        // Execute the command directly with simpler approach
         this.log(`Running TN93 command: ${tn93Command}`);
         const tn93Result = await CLI.exec(tn93Command);
+        this.log("TN93 execution completed");
         
         if (tn93Result.stderr) {
           this.log("TN93 stderr: " + tn93Result.stderr);
         }
         
-        // Verify distance file was created
-        const distancesExist = await CLI.fs.exists(PAIRWISE_DIST_FILE_NAME);
-        if (!distancesExist) {
-          this.log("Error: TN93 did not create distance file");
-          throw new Error("TN93 failed to create distance file");
+        // Add a delay to ensure filesystem operations are complete
+        this.log("Waiting for filesystem operations to complete...");
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Read the output directly without checking if it exists first
+        this.log("Reading TN93 output directly...");
+        
+        try {
+          // Use CLI.cat() which is simpler and bypasses fs.exists
+          const outputDistances = await CLI.cat(PAIRWISE_DIST_FILE_NAME);
+          
+          if (!outputDistances || outputDistances === "") {
+            throw new Error("TN93 output file exists but is empty");
+          }
+          
+          this.log(`TN93 output file read successfully (${outputDistances.length} bytes)`);
+          
+          // Store the pairwise distances in state
+          this.setState({ pairwiseDistances: outputDistances });
+          
+          // Log the first few lines of the tn93 output
+          this.log(`TN93 output (first 200 chars): ${outputDistances.substring(0, 200)}`);
+          this.log("TN93 completed successfully");
+        } catch (catError) {
+          this.log(`Error reading TN93 output file: ${catError.message}`);
+          console.error("TN93 file read error:", catError);
+          throw new Error(`Failed to read TN93 output: ${catError.message}`);
         }
-        
-        const distanceStats = await CLI.fs.stat(PAIRWISE_DIST_FILE_NAME);
-        this.log(`Distance file created, size: ${distanceStats.size} bytes`);
-        
-        this.log("TN93 completed successfully");
       } catch (tn93Error) {
         this.log(`Error running TN93: ${tn93Error.message}`);
+        console.error("Complete TN93 error:", tn93Error);
         throw tn93Error;
       }
-      
-      // Read the tn93 output from biowasm filesystem
-      this.log("Reading tn93 output from biowasm filesystem");
-      const outputDistances = await CLI.fs.readFile(PAIRWISE_DIST_FILE_NAME, {
-        encoding: "utf8"
-      });
-      
-      // Store the pairwise distances in state
-      this.setState({ pairwiseDistances: outputDistances });
-      
-      // Log the first few lines of the tn93 output
-      this.log(`TN93 output (first 200 chars): ${outputDistances.substring(0, 200)}`);
       
       // Now use the HIVCluster-RS to process the TN93 output
       this.log("Running HIVCluster-RS on TN93 output");
       try {
+        // Read the TN93 output file directly again
+        this.log("Reading TN93 output for HIVCluster-RS processing...");
+        let outputDistances;
+        
+        try {
+          // Read the file again directly
+          outputDistances = await CLI.cat(PAIRWISE_DIST_FILE_NAME);
+          
+          if (!outputDistances || outputDistances === "") {
+            throw new Error("TN93 output file exists but is empty");
+          }
+          
+          this.log(`Read ${outputDistances.length} bytes of distance data for processing`);
+          
+          // Save to state in case it wasn't saved earlier
+          this.setState({ pairwiseDistances: outputDistances });
+        } catch (readError) {
+          this.log(`Error reading TN93 output for HIVCluster-RS: ${readError.message}`);
+          throw readError;
+        }
+        
         // Process the network with HIVCluster-RS
-        const jsonOutput = hivclusterBuildNetwork(outputDistances, distanceThreshold, "plain");
+        this.log("Building network with HIVCluster-RS...");
+        
+        // Remove the header line from the CSV before processing
+        let processedDistances = outputDistances;
+        if (processedDistances.startsWith("ID1,ID2,Distance")) {
+          this.log("Removing CSV header line before processing");
+          // Split by newline and remove the first line
+          const lines = processedDistances.split('\n');
+          lines.shift(); // Remove the header line
+          processedDistances = lines.join('\n');
+        }
+        
+        const jsonOutput = hivclusterBuildNetwork(processedDistances, distanceThreshold, "plain");
         
         // Parse the network JSON
         try {
+          this.log("Parsing network JSON...");
           const networkData = JSON.parse(jsonOutput);
           this.setState({ networkData });
           
@@ -427,7 +493,7 @@ export class App extends Component {
           console.log("Network data:", networkData);
         } catch (jsonError) {
           this.log(`Error parsing network JSON: ${jsonError.message}`);
-          this.log(`Raw network data: ${jsonOutput.substring(0, 100)}...`);
+          this.log(`Raw network data: ${jsonOutput ? jsonOutput.substring(0, 100) : "empty"}...`);
           console.error("JSON parse error:", jsonError);
         }
       } catch (hivclusterError) {
