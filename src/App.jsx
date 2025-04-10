@@ -193,7 +193,7 @@ export class App extends Component {
 
         this.log("TESTING CAWLIGN:");
         const cawlignOutput = await CLI.exec(
-          `cawlign -o test.aln -r /shared/cawlign/references/HXB2_pol ${
+          `cawlign -o test.aln -t codon -s /shared/cawlign/scoring/HIV_BETWEEN_F -r /shared/cawlign/references/HXB2_pol ${
             mounts[0]
           }`,
         );
@@ -202,7 +202,7 @@ export class App extends Component {
 
         this.log("TESTING TN93:");
         const tn93Output = await CLI.exec(
-          `tn93 -t 0.015 -o test.csv ${mounts[0]}`,
+          `tn93 -q -t 0.015 -o test.csv ${mounts[0]}`,
         );
         const tn93Result = await CLI.cat("test.csv");
         console.log(tn93Output);
@@ -332,7 +332,7 @@ export class App extends Component {
       this.log("Running cawlign to align sequences");
       try {
         // Simplify the approach to avoid the fs.exists issue
-        const cawlignCommand = `cawlign -o ${ALIGNED_SEQUENCE_FILE} -r /shared/cawlign/references/HXB2_pol ${ALIGNMENT_FILE_NAME}`;
+        const cawlignCommand = `cawlign -q -o ${ALIGNED_SEQUENCE_FILE} -t codon -s /shared/cawlign/scoring/HIV_BETWEEN_F -r /shared/cawlign/references/HXB2_pol ${ALIGNMENT_FILE_NAME}`;
         this.log(`Running cawlign command: ${cawlignCommand}`);
         
         // Execute the command with a direct try/catch
@@ -381,7 +381,7 @@ export class App extends Component {
       this.log("Running TN93 on aligned sequences");
       try {
         // Build TN93 command
-        let tn93Command = `tn93 -t ${distanceThreshold} -a ${ambiguities} -l ${minOverlap} -f csv -o ${PAIRWISE_DIST_FILE_NAME}`;
+        let tn93Command = `tn93 -q -t ${distanceThreshold} -a ${ambiguities} -l ${minOverlap} -f csv -o ${PAIRWISE_DIST_FILE_NAME}`;
         
         // Add ambiguity fraction if using 'resolve' mode
         if (ambiguities === "resolve") {
