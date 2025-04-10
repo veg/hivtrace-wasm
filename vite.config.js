@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['hivcluster_rs_web']
+    exclude: ['hivcluster_rs_web', 'hivannotate_rs_web']
   },
   assetsInclude: ['**/*.wasm'],
 })
