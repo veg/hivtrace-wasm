@@ -1320,6 +1320,16 @@ export class App extends Component {
                     </button>
                   )}
                 </div>
+                
+                <div className="mt-4 alert alert-info">
+                  <h5><i className="bi bi-info-circle me-2"></i>Visualize your results</h5>
+                  <p>To visualize your network:</p>
+                  <ol>
+                    <li>Download the JSON file using the button above</li>
+                    <li>Visit <a href="https://veg.github.io/hivtrace-viz/" target="_blank" rel="noreferrer">https://veg.github.io/hivtrace-viz/</a></li>
+                    <li>Click "Browse" and select your downloaded JSON file</li>
+                  </ol>
+                </div>
               </div>
             </div>
           )}
