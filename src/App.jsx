@@ -1351,19 +1351,19 @@ export class App extends Component {
                     <li>Click "Browse" and select your downloaded JSON file</li>
                   </ol>
                 </div>
-                
-                <div className="mt-4 alert alert-secondary">
-                  <h5><i className="bi bi-link-45deg me-2"></i>Related Tools</h5>
-                  <ul>
-                    <li><strong>Python Implementation:</strong> For the original Python implementation, visit <a href="https://github.com/veg/hivtrace" target="_blank" rel="noreferrer">github.com/veg/hivtrace</a></li>
-                    <li><strong>AUTO-TUNE:</strong> A tool for selecting the optimal distance threshold for HIV transmission clusters at <a href="https://autotune.datamonkey.org" target="_blank" rel="noreferrer">autotune.datamonkey.org</a></li>
-                    <li><strong>COVFEFE:</strong> A tool for evaluating HIV genetic networks at <a href="https://covfefe.datamonkey.org" target="_blank" rel="noreferrer">covfefe.datamonkey.org</a></li>
-                  </ul>
-                </div>
-                
                 </div>
             </div>
           )}
+          
+          <div className="mt-4 alert alert-secondary">
+            <h5><i className="bi bi-link-45deg me-2"></i>Related Tools</h5>
+            <ul>
+              <li><strong>Python Implementation:</strong> For the original Python implementation, visit <a href="https://github.com/veg/hivtrace" target="_blank" rel="noreferrer">github.com/veg/hivtrace</a></li>
+              <li><strong>AUTO-TUNE:</strong> A tool for selecting the optimal distance threshold for HIV transmission clusters at <a href="https://autotune.datamonkey.org" target="_blank" rel="noreferrer">autotune.datamonkey.org</a></li>
+              <li><strong>COVFEFE:</strong> A tool for evaluating HIV genetic networks at <a href="https://covfefe.datamonkey.org" target="_blank" rel="noreferrer">covfefe.datamonkey.org</a></li>
+            </ul>
+          </div>
+          
         </div>
         <small className="text-center mt-5">
           Source code:{" "}
