@@ -1,11 +1,14 @@
 import React, { Component, Fragment, useEffect, useState } from "react";
 import init, { build_network } from "hivcluster_rs_web";
+import hivannotateInit, { annotate_network_json } from "hivannotate_rs_web";
 
 // Fallback initialization and methods in case npm package fails
 let hivclusterInit = init;
 let hivclusterBuildNetwork = build_network;
+let hivannotateAnnotateNetwork = annotate_network_json;
 
 import {
+  ATTRIBUTES_PATH,
   AVAILABLE_REFERENCES,
   CAWLIGN_TEST_DATA_PATH,
   CAWLIGN_VERSION,
@@ -13,6 +16,7 @@ import {
   GET_TIME_WITH_MILLISECONDS,
   HIVCLUSTER_RS_VERSION,
   OUTPUT_ID,
+  SCHEMA_PATH,
   SEATTLE_FASTA_PATH,
   TN93_VERSION,
 } from "./constants";
@@ -42,12 +46,58 @@ export class App extends Component {
       inputData: null,
       alignmentData: null,
       pairwiseDistances: null,
+      annotatedNetworkData: null,
+      attributesData: null,
+      schemaData: null,
+      useAnnotation: false,
+      customAttributesFile: undefined,
+      customSchemaFile: undefined,
     };
   }
 
   componentDidMount() {
     this.initHivclusterRS();
+    this.initHivannotate();
     this.initBiowasm();
+  }
+  
+  initHivannotate = async () => {
+    try {
+      this.log("Initializing HIVAnnotate WASM...");
+      await hivannotateInit();
+      this.log("HIVAnnotate WASM initialized successfully.");
+      
+      // Load default attributes and schema
+      this.loadDefaultAnnotationData();
+    } catch (error) {
+      this.log(`Error initializing HIVAnnotate WASM: ${error.message || error}`);
+      console.error("HIVAnnotate init error:", error);
+    }
+  }
+  
+  loadDefaultAnnotationData = async () => {
+    try {
+      // Fetch default attributes and schema
+      const attributesResponse = await fetch(`${import.meta.env.BASE_URL || ""}${ATTRIBUTES_PATH}`);
+      const schemaResponse = await fetch(`${import.meta.env.BASE_URL || ""}${SCHEMA_PATH}`);
+      
+      if (!attributesResponse.ok || !schemaResponse.ok) {
+        throw new Error("Failed to fetch annotation data");
+      }
+      
+      const attributesData = await attributesResponse.json();
+      const schemaData = await schemaResponse.json();
+      
+      this.setState({ 
+        attributesData: JSON.stringify(attributesData),
+        schemaData: JSON.stringify(schemaData)
+      });
+      
+      this.log("Default annotation data loaded successfully");
+    } catch (error) {
+      this.log(`Error loading annotation data: ${error.message || error}`);
+      console.error("Annotation data loading error:", error);
+    }
   }
 
   setInputFile = (event) => {
@@ -85,6 +135,24 @@ export class App extends Component {
         reference: "custom"
       });
       this.log(`Custom reference file selected: ${event.target.files[0].name}`);
+    }
+  };
+  
+  toggleAnnotation = (event) => {
+    this.setState({ useAnnotation: event.target.checked });
+  };
+  
+  setCustomAttributesFile = (event) => {
+    if (event.target.files && event.target.files[0]) {
+      this.setState({ customAttributesFile: event.target.files[0] });
+      this.log(`Custom attributes file selected: ${event.target.files[0].name}`);
+    }
+  };
+  
+  setCustomSchemaFile = (event) => {
+    if (event.target.files && event.target.files[0]) {
+      this.setState({ customSchemaFile: event.target.files[0] });
+      this.log(`Custom schema file selected: ${event.target.files[0].name}`);
     }
   };
 
@@ -267,7 +335,10 @@ export class App extends Component {
         ambiguityFraction: 0.015,
         removeDrams: "no",
         reference: "HXB2_pol",  // Default reference for the example data
-        customReferenceFile: undefined
+        customReferenceFile: undefined,
+        useAnnotation: true,    // Enable annotation for example data
+        customAttributesFile: undefined,
+        customSchemaFile: undefined
       }, () => {
         this.log("Example data and parameters loaded successfully.");
         // Display the file name in the UI
@@ -586,6 +657,12 @@ export class App extends Component {
           }
           
           this.log("HIVCluster-RS processing completed successfully");
+          
+          // Run annotation if enabled
+          if (this.state.useAnnotation) {
+            await this.runAnnotation(jsonOutput);
+          }
+          
           console.log("Network data:", networkData);
         } catch (jsonError) {
           this.log(`Error parsing network JSON: ${jsonError.message}`);
@@ -605,6 +682,72 @@ export class App extends Component {
     }
   };
 
+  runAnnotation = async (networkJson) => {
+    this.log("Running HIVAnnotate on network data...");
+    
+    try {
+      // Get attributes and schema data - either from custom upload or default
+      let attributesJson, schemaJson;
+      
+      if (this.state.customAttributesFile) {
+        // Read from custom file
+        this.log("Reading custom attributes file...");
+        attributesJson = await this.state.customAttributesFile.text();
+      } else if (this.state.attributesData) {
+        // Use pre-loaded data
+        attributesJson = this.state.attributesData;
+        this.log("Using default attributes data");
+      } else {
+        throw new Error("No attributes data available");
+      }
+      
+      if (this.state.customSchemaFile) {
+        // Read from custom file
+        this.log("Reading custom schema file...");
+        schemaJson = await this.state.customSchemaFile.text();
+      } else if (this.state.schemaData) {
+        // Use pre-loaded data
+        schemaJson = this.state.schemaData;
+        this.log("Using default schema data");
+      } else {
+        throw new Error("No schema data available");
+      }
+      
+      // Run annotation
+      this.log("Annotating network...");
+      const annotatedJson = hivannotateAnnotateNetwork(networkJson, attributesJson, schemaJson);
+      
+      if (!annotatedJson) {
+        throw new Error("Annotation failed - no output returned");
+      }
+      
+      // Store annotated data
+      this.setState({ annotatedNetworkData: annotatedJson });
+      
+      // Parse to get stats
+      const annotatedData = JSON.parse(annotatedJson);
+      const hasTraceResults = annotatedData.trace_results !== undefined;
+      const rootObj = hasTraceResults ? annotatedData.trace_results : annotatedData;
+      
+      // Count nodes with annotations
+      if (rootObj.Nodes) {
+        const totalNodes = rootObj.Nodes.length || 0;
+        const nodesWithAttributes = rootObj.Nodes.filter(n => 
+          n.patient_attributes !== undefined).length || 0;
+        
+        this.log(`Annotation complete: ${nodesWithAttributes} of ${totalNodes} nodes annotated (${Math.round(nodesWithAttributes/totalNodes*100)}%)`);
+      }
+      
+      this.log("HIVAnnotate processing completed successfully");
+      return annotatedJson;
+      
+    } catch (error) {
+      this.log(`Error in annotation process: ${error.message || error}`);
+      console.error("Annotation error:", error);
+      return null;
+    }
+  };
+  
   downloadData = (filename, content) => {
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -791,6 +934,56 @@ export class App extends Component {
                   Upload a custom reference sequence file for alignment. This will override the selection above.
                 </small>
               </div>
+              
+              <hr className="mt-4 mb-4" />
+              
+              <div className="mb-3">
+                <div className="form-check form-switch">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="use-annotation"
+                    checked={this.state.useAnnotation}
+                    onChange={this.toggleAnnotation}
+                  />
+                  <label className="form-check-label" htmlFor="use-annotation">
+                    Enable Network Annotation
+                  </label>
+                </div>
+                <small className="text-muted d-block mt-1">
+                  Annotate network nodes with additional metadata from attributes file
+                </small>
+              </div>
+              
+              {this.state.useAnnotation && (
+                <div className="annotation-options">
+                  <div className="mb-3">
+                    <label htmlFor="custom-attributes" className="form-label">Custom Attributes JSON (Optional)</label>
+                    <input
+                      className="form-control"
+                      type="file"
+                      id="custom-attributes"
+                      onChange={this.setCustomAttributesFile}
+                    />
+                    <small className="text-muted d-block mt-1">
+                      Upload a custom attributes file or use the default example data
+                    </small>
+                  </div>
+                  
+                  <div className="mb-3">
+                    <label htmlFor="custom-schema" className="form-label">Custom Schema JSON (Optional)</label>
+                    <input
+                      className="form-control"
+                      type="file"
+                      id="custom-schema"
+                      onChange={this.setCustomSchemaFile}
+                    />
+                    <small className="text-muted d-block mt-1">
+                      Upload a custom schema file or use the default example data
+                    </small>
+                  </div>
+                </div>
+              )}
             </div>
             <button
               className="btn btn-warning mt-4 w-100"
@@ -852,12 +1045,21 @@ export class App extends Component {
               <div className="downloads mt-4">
                 <h4>Download Results</h4>
                 <div className="download-buttons">
-                  <button 
-                    className="btn btn-success me-2" 
-                    onClick={() => this.downloadData('network_results.json', JSON.stringify(this.state.networkData, null, 2))}
-                  >
-                    <i className="bi bi-download me-2"></i>Network Results (JSON)
-                  </button>
+                  {this.state.annotatedNetworkData ? (
+                    <button 
+                      className="btn btn-success me-2" 
+                      onClick={() => this.downloadData('annotated_network_results.json', this.state.annotatedNetworkData)}
+                    >
+                      <i className="bi bi-download me-2"></i>Annotated Network Results (JSON)
+                    </button>
+                  ) : (
+                    <button 
+                      className="btn btn-success me-2" 
+                      onClick={() => this.downloadData('network_results.json', JSON.stringify(this.state.networkData, null, 2))}
+                    >
+                      <i className="bi bi-download me-2"></i>Network Results (JSON)
+                    </button>
+                  )}
                   
                   {this.state.inputData && (
                     <button 

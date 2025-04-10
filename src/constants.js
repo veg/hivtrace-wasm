@@ -22,6 +22,8 @@ export const GET_TIME_WITH_MILLISECONDS = (date) => {
 
 export const CAWLIGN_TEST_DATA_PATH = 'data/HIV1-pol-326-modified.fa';
 export const SEATTLE_FASTA_PATH = 'data/seattle.fasta';
+export const ATTRIBUTES_PATH = 'data/annotation/attributes.json';
+export const SCHEMA_PATH = 'data/annotation/schema.json';
 
 // List of available references from data/references/ directory
 export const AVAILABLE_REFERENCES = [
