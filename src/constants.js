@@ -1,6 +1,7 @@
 export const CAWLIGN_VERSION = "0.1.0";
 export const TN93_VERSION = "1.0.11";
-export const HIVCLUSTER_RS_VERSION = "0.1.0";
+export const HIVCLUSTER_RS_VERSION = "0.2.0";
+export const HIVANNOTATE_RS_VERSION = "0.2.0";
 export const OUTPUT_ID = "output-console";
 
 export const DEFAULT_INPUT_STATE = {

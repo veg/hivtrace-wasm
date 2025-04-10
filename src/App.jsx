@@ -14,6 +14,7 @@ import {
   CAWLIGN_VERSION,
   CLEAR_LOG,
   GET_TIME_WITH_MILLISECONDS,
+  HIVANNOTATE_RS_VERSION,
   HIVCLUSTER_RS_VERSION,
   OUTPUT_ID,
   SCHEMA_PATH,
@@ -63,7 +64,7 @@ export class App extends Component {
   
   initHivannotate = async () => {
     try {
-      this.log("Initializing HIVAnnotate WASM...");
+      this.log(`Initializing HIVAnnotate WASM v${HIVANNOTATE_RS_VERSION}...`);
       await hivannotateInit();
       this.log("HIVAnnotate WASM initialized successfully.");
       
@@ -158,7 +159,7 @@ export class App extends Component {
 
   initHivclusterRS = async () => {
     try {
-      this.log("Initializing HIVCluster-RS WASM...");
+      this.log(`Initializing HIVCluster-RS WASM v${HIVCLUSTER_RS_VERSION}...`);
       
       // Add a delay to ensure environment is ready
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -800,7 +801,15 @@ export class App extends Component {
             target="_blank"
             rel="noreferrer"
           >
-            hivcluster-rs
+            hivcluster-rs (v{HIVCLUSTER_RS_VERSION})
+          </a>
+          &nbsp;and&nbsp;
+          <a
+            href="https://github.com/veg/hivannotate-rs"
+            target="_blank"
+            rel="noreferrer"
+          >
+            hivannotate-rs (v{HIVANNOTATE_RS_VERSION})
           </a>
           . Implemented using&nbsp;
           <a href="https://biowasm.com/" target="_blank" rel="noreferrer">
