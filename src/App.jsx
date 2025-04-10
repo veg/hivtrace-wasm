@@ -6,6 +6,7 @@ let hivclusterInit = init;
 let hivclusterBuildNetwork = build_network;
 
 import {
+  AVAILABLE_REFERENCES,
   CAWLIGN_TEST_DATA_PATH,
   CAWLIGN_VERSION,
   CLEAR_LOG,
@@ -34,6 +35,9 @@ export class App extends Component {
       ambiguities: "resolve",
       ambiguityFraction: undefined,
       removeDrams: "no",
+      reference: "HXB2_pol",
+      customReferenceFile: undefined,
+      availableReferences: [],
       networkData: null,
       inputData: null,
       alignmentData: null,
@@ -68,6 +72,20 @@ export class App extends Component {
   
   setRemoveDrams = (event) => {
     this.setState({ removeDrams: event.target.value });
+  };
+  
+  setReference = (event) => {
+    this.setState({ reference: event.target.value, customReferenceFile: undefined });
+  };
+  
+  setCustomReferenceFile = (event) => {
+    if (event.target.files && event.target.files[0]) {
+      this.setState({ 
+        customReferenceFile: event.target.files[0],
+        reference: "custom"
+      });
+      this.log(`Custom reference file selected: ${event.target.files[0].name}`);
+    }
   };
 
   initHivclusterRS = async () => {
@@ -178,6 +196,18 @@ export class App extends Component {
       async () => {
         this.log("cawlign and tn93 loaded via Biowasm.");
         const CLI = this.state.CLI;
+        
+        // Use the predefined list of available references from constants.js
+        this.setState({ availableReferences: AVAILABLE_REFERENCES });
+        this.log(`Loaded ${AVAILABLE_REFERENCES.length} available references`);
+        
+        // Group references by type for debugging
+        const hivRefs = AVAILABLE_REFERENCES.filter(ref => ref.startsWith("HXB2_"));
+        const covidRefs = AVAILABLE_REFERENCES.filter(ref => ref.startsWith("CoV2-"));
+        this.log(`Available references include ${hivRefs.length} HIV and ${covidRefs.length} COVID references`);
+        
+        
+        // Continue with the rest of the initialization
         const data = await (
           await fetch(
             `${import.meta.env.BASE_URL || ""}${CAWLIGN_TEST_DATA_PATH}`,
@@ -235,7 +265,9 @@ export class App extends Component {
         minOverlap: 500,
         ambiguities: "resolve",
         ambiguityFraction: 0.015,
-        removeDrams: "no"
+        removeDrams: "no",
+        reference: "HXB2_pol",  // Default reference for the example data
+        customReferenceFile: undefined
       }, () => {
         this.log("Example data and parameters loaded successfully.");
         // Display the file name in the UI
@@ -328,16 +360,80 @@ export class App extends Component {
       const ALIGNED_SEQUENCE_FILE = "aligned_sequences.fasta";
       const PAIRWISE_DIST_FILE_NAME = "output_distances.csv";
       
-      // Step 1: Run cawlign to align sequences
+      // Step 1: Handle reference selection or upload
+      const REFERENCE_FILE_NAME = "reference.fa";
+      let referencePathForCommand = "";
+      
+      // Check if a custom file was uploaded AND we selected "custom" reference
+      if (this.state.reference === "custom" && this.state.customReferenceFile) {
+        this.log("Processing custom reference file");
+        try {
+          const customReferenceContent = await this.state.customReferenceFile.text();
+          
+          // Log some info about the custom reference
+          const firstLine = customReferenceContent.split('\n')[0] || "";
+          this.log(`Custom reference: ${this.state.customReferenceFile.name} (${this.state.customReferenceFile.size} bytes)`);
+          if (firstLine.startsWith('>')) {
+            this.log(`Reference header: ${firstLine}`);
+          }
+          
+          // Get extensionless filename
+          const fileName = this.state.customReferenceFile.name.split('.')[0] || "custom_reference";
+          const safeFileName = fileName.replace(/[^a-z0-9_-]/gi, '_');
+          
+          // Use a clear naming convention that won't conflict with path expectations
+          const CUSTOM_REF_PATH = `custom_ref_${safeFileName}.fa`;
+          
+          // Write to filesystem - make sure to use await
+          this.log(`Writing custom reference to filesystem as ${CUSTOM_REF_PATH}`);
+          await CLI.fs.writeFile(CUSTOM_REF_PATH, customReferenceContent);
+          
+          // Verify the file was written
+          try {
+            const fileSize = await CLI.fs.stat(CUSTOM_REF_PATH).size;
+            this.log(`Custom reference uploaded successfully (${fileSize} bytes)`);
+            
+            // Use the full path to the custom reference file
+            referencePathForCommand = CUSTOM_REF_PATH;
+          } catch (statError) {
+            this.log(`Failed to verify custom reference file: ${statError.message}`);
+            throw statError;
+          }
+        } catch (refError) {
+          this.log(`Error processing custom reference: ${refError.message}`);
+          throw refError;
+        }
+      } else {
+        // Use selected reference from available options
+        referencePathForCommand = `/shared/cawlign/references/${this.state.reference}`;
+        this.log(`Using reference: ${this.state.reference}`);
+      }
+      
+      // Step 2: Run cawlign to align sequences
       this.log("Running cawlign to align sequences");
       try {
-        // Simplify the approach to avoid the fs.exists issue
-        const cawlignCommand = `cawlign -q -o ${ALIGNED_SEQUENCE_FILE} -t codon -s /shared/cawlign/scoring/HIV_BETWEEN_F -r /shared/cawlign/references/HXB2_pol ${ALIGNMENT_FILE_NAME}`;
+        // Build cawlign command with selected or custom reference
+        const cawlignCommand = `cawlign -q -o ${ALIGNED_SEQUENCE_FILE} -t codon -s /shared/cawlign/scoring/HIV_BETWEEN_F -r ${referencePathForCommand} ${ALIGNMENT_FILE_NAME}`;
         this.log(`Running cawlign command: ${cawlignCommand}`);
+        
+        // Debug - list files in directory to verify
+        try {
+          const ls = await CLI.exec("ls -la");
+          this.log("Current directory contents:");
+          this.log(ls.stdout || "No files found");
+        } catch (lsError) {
+          this.log("Could not list directory: " + lsError.message);
+        }
         
         // Execute the command with a direct try/catch
         this.log("Executing cawlign command...");
         const cawlignResult = await CLI.exec(cawlignCommand);
+        
+        // Log any stderr output immediately
+        if (cawlignResult.stderr) {
+          this.log("cawlign stderr: " + cawlignResult.stderr);
+        }
+        
         this.log("cawlign execution completed");
         
         if (cawlignResult.stderr) {
@@ -646,6 +742,55 @@ export class App extends Component {
                   CDC Surveillance List
                 </option>
               </select>
+              
+              <p className="mt-4 mb-2">Reference Sequence</p>
+              <div className="mb-3">
+                <label className="form-label d-block">Select from Available References</label>
+                <select
+                  className="form-select"
+                  id="reference"
+                  value={this.state.reference}
+                  onChange={this.setReference}
+                >
+                  <option value="" disabled>Select a reference</option>
+                  
+                  <optgroup label="HIV References">
+                    {this.state.availableReferences
+                      .filter(ref => ref.startsWith("HXB2_"))
+                      .map(ref => (
+                        <option key={ref} value={ref}>{ref}</option>
+                      ))
+                    }
+                  </optgroup>
+                  
+                  <optgroup label="COVID-19 References">
+                    {this.state.availableReferences
+                      .filter(ref => ref.startsWith("CoV2-"))
+                      .map(ref => (
+                        <option key={ref} value={ref}>{ref}</option>
+                      ))
+                    }
+                  </optgroup>
+                  
+                  <option value="custom">Use Custom Reference</option>
+                </select>
+                <small className="text-muted d-block mt-1">
+                  {this.state.availableReferences.length} references available. Select one or upload your own below.
+                </small>
+              </div>
+              
+              <div className="mt-3 mb-3">
+                <label htmlFor="custom-reference" className="form-label">Or Upload Custom Reference</label>
+                <input
+                  className="form-control"
+                  type="file"
+                  id="custom-reference"
+                  onChange={this.setCustomReferenceFile}
+                />
+                <small className="text-muted d-block mt-1">
+                  Upload a custom reference sequence file for alignment. This will override the selection above.
+                </small>
+              </div>
             </div>
             <button
               className="btn btn-warning mt-4 w-100"
