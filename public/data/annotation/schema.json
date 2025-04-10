@@ -1,0 +1,46 @@
+{
+  "ehars_uid": {
+    "type": "String",
+    "label": "ehars_uid"
+  },
+  "natHost": {
+    "type": "String",
+    "label": "natHost"
+  },
+  "genoType": {
+    "type": "String",
+    "label": "genoType"
+  },
+  "country": {
+    "type": "String",
+    "label": "country"
+  },
+  "collectionDate": {
+    "type": "String",
+    "label": "collectionDate"
+  },
+  "organism": {
+    "type": "String",
+    "label": "organism"
+  },
+  "molType": {
+    "type": "String",
+    "label": "molType"
+  },
+  "strain": {
+    "type": "String",
+    "label": "strain"
+  },
+  "isolate": {
+    "type": "String",
+    "label": "isolate"
+  },
+  "isolateSource": {
+    "type": "String",
+    "label": "isolateSource"
+  },
+  "latLong": {
+    "type": "String",
+    "label": "latLong"
+  }
+}
