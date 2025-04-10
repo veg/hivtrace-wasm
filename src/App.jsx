@@ -944,10 +944,10 @@ export class App extends Component {
   render() {
     return (
       <Fragment>
-        <h2 className="mt-5 text-center">HIV-TRACE WASM</h2>
+        <h2 className="mt-5 text-center">HIV-TRACE</h2>
         <p className="text-center">
-          A completely client-side WebAssembly implementation of the HIV-TRACE
-          pipeline. Uses&nbsp;
+          A complete browser-based implementation of the HIV-TRACE pipeline that runs entirely in your browser.
+          No data is sent to any server - all processing happens locally on your device. Uses&nbsp;
           <a
             href="https://github.com/veg/cawlign"
             target="_blank"
@@ -969,7 +969,7 @@ export class App extends Component {
             target="_blank"
             rel="noreferrer"
           >
-            hivcluster-rs (v{HIVCLUSTER_RS_VERSION})
+            hivcluster-rs
           </a>
           &nbsp;and&nbsp;
           <a
@@ -977,21 +977,42 @@ export class App extends Component {
             target="_blank"
             rel="noreferrer"
           >
-            hivannotate-rs (v{HIVANNOTATE_RS_VERSION})
-          </a>
-          . Implemented using&nbsp;
-          <a href="https://biowasm.com/" target="_blank" rel="noreferrer">
-            Biowasm
-          </a>
-          &nbsp;and&nbsp;
-          <a href="https://emscripten.org/" target="_blank" rel="noreferrer">
-            Emscripten
+            hivannotate-rs
           </a>
           .
         </p>
         <div id="content" className="mt-3">
           <div id="input-container">
             <h3>Input</h3>
+            
+            <div className="alert alert-secondary mt-2 mb-3">
+              <div className="d-flex justify-content-between align-items-center" style={{ cursor: "pointer" }} 
+                   onClick={() => document.getElementById('documentation-content').classList.toggle('d-none')}>
+                <h5 className="mb-0"><i className="bi bi-book me-2"></i>About HIV-TRACE</h5>
+                <i className="bi bi-chevron-down"></i>
+              </div>
+              <div id="documentation-content" className="d-none mt-3">
+                <p>HIV-TRACE (TRAnsmission Cluster Engine) identifies potential transmission clusters within a supplied FASTA file.</p>
+                
+                <h6><i className="bi bi-sliders me-2"></i>Input Parameters</h6>
+                <ul>
+                  <li><strong>Distance Threshold</strong>: Two sequences will be connected with a putative link if their pairwise distance does not exceed this threshold (default: 0.015).</li>
+                  <li><strong>Minimum Overlap</strong>: Only sequences that overlap by at least this many non-gap characters will be included in distance calculations. Adjust based on the length of input sequences (default: 500).</li>
+                  <li><strong>Ambiguities</strong>:
+                    <ul>
+                      <li><em>Resolve</em>: Count any resolutions that match as a perfect match</li>
+                      <li><em>Average</em>: Average all possible resolutions</li>
+                    </ul>
+                  </li>
+                  <li><strong>Ambiguity Fraction</strong>: Affects only the "Resolve" option. Any sequence with no more than this proportion of ambiguities will have its ambiguities resolved, and sequences with higher fractions will be averaged.</li>
+                  <li><strong>Reference Sequence</strong>: The sequence used to align all provided sequences. Select from built-in references or upload a custom one.</li>
+                </ul>
+                
+                <h6><i className="bi bi-journal-text me-2"></i>Citation</h6>
+                <p className="small">Kosakovsky Pond SL, Weaver S, Leigh Brown AJ, Wertheim JO. HIV-TRACE (TRAnsmission Cluster Engine): a Tool for Large Scale Molecular Epidemiology of HIV-1 and Other Rapidly Evolving Pathogens. Mol Biol Evol. 2018 Jul 1;35(7):1812-1819. doi: 10.1093/molbev/msy016. PMID: 29401317; PMCID: PMC5995201.</p>
+              </div>
+            </div>
+            
             <div id="input" className="pb-4">
               <div id="input-sequences-container" className="mb-3">
                 <label htmlFor="input-sequences" className="form-label">
@@ -1330,7 +1351,8 @@ export class App extends Component {
                     <li>Click "Browse" and select your downloaded JSON file</li>
                   </ol>
                 </div>
-              </div>
+                
+                </div>
             </div>
           )}
         </div>
